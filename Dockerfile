@@ -5,7 +5,7 @@
 FROM debian:bookworm-slim AS build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential python3 ca-certificates \
+        apt-utils build-essential python3 ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s /usr/bin/python3 /usr/local/bin/python
 
