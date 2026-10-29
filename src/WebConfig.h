@@ -33,12 +33,14 @@ public:
     const std::string& ApiServer() const { return iApiServer; }
     TUint WebPort() const { return iWebPort; }
     const std::string& Room() const { return iRoom; }
+    const std::string& Udn() const { return iUdn; }
 
     void SetCountries(const std::vector<std::string>& aCountries);
     void SetGenres(const std::vector<std::string>& aGenres);
     void SetApiServer(const std::string& aServer);
     void SetWebPort(TUint aPort);
     void SetRoom(const std::string& aRoom);
+    void SetUdn(const std::string& aUdn);
 
 private:
     std::vector<std::string> iCountries;
@@ -46,6 +48,7 @@ private:
     std::string iApiServer;
     TUint iWebPort;
     std::string iRoom;
+    std::string iUdn;
 };
 
 // Blocking accept loop; run on its own thread. Serves:

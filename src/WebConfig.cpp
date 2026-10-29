@@ -164,6 +164,9 @@ void Preferences::Load(const std::string& aPath)
     if (FindValue(doc, "room", v) && !v.empty()) {
         iRoom = v;
     }
+    if (FindValue(doc, "udn", v) && !v.empty()) {
+        iUdn = v;
+    }
     const std::vector<std::string> countries = FindArray(doc, "countries");
     if (!countries.empty()) {
         iCountries = countries;
@@ -182,6 +185,7 @@ void Preferences::Save(const std::string& aPath)
     }
     out << "{\n";
     out << "  \"room\": " << JsonEscape(iRoom) << ",\n";
+    out << "  \"udn\": " << JsonEscape(iUdn) << ",\n";
     out << "  \"api_server\": " << JsonEscape(iApiServer) << ",\n";
     out << "  \"web_port\": " << iWebPort << ",\n";
     out << "  \"countries\": [";
@@ -231,6 +235,13 @@ void Preferences::SetRoom(const std::string& aRoom)
 {
     if (!aRoom.empty()) {
         iRoom = aRoom;
+    }
+}
+
+void Preferences::SetUdn(const std::string& aUdn)
+{
+    if (!aUdn.empty()) {
+        iUdn = aUdn;
     }
 }
 

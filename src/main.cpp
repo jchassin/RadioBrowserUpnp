@@ -13,6 +13,8 @@
 #include <OpenHome/Private/Ascii.h>
 
 #include <arpa/inet.h>
+#include <cstdint>
+#include <ctime>
 #include <atomic>
 #include <csignal>
 #include <cstdio>
@@ -33,22 +35,32 @@ static void SigHandler(int)
     gQuit = true;
 }
 
-// Deterministic udn from the host name so the device keeps a stable identity
-// across restarts (control points remember pinned stations by udn).
+// UDN must be a valid uuid:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (UPnP 1.0
+// device architecture); malformed uuids are silently rejected by some control
+// points (e.g. Linn/Kazoo validate the format).
+// The udn is generated once and persisted in the config file so the device
+// keeps a stable identity across restarts and hostname changes (control
+// points remember pinned stations by udn).
 static std::string MakeUdn()
 {
-    char host[64] = {0};
-    if (::gethostname(host, sizeof(host) - 1) != 0) {
-        std::strcpy(host, "radiobrowser");
-    }
-    // simple djb2 hash of the host name
-    uint32_t h = 5381;
-    for (char* p = host; *p; p++) {
-        h = ((h << 5) + h) + static_cast<uint32_t>(static_cast<unsigned char>(*p));
-    }
-    std::ostringstream os;
-    os << "uuid:" << std::hex << h << "-0000-4000-8000-" << std::hex << h << h;
-    return os.str();
+    uint32_t a = static_cast<uint32_t>(::time(nullptr));
+    uint32_t b = static_cast<uint32_t>(::clock());
+    uint32_t c = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&a));
+    uint32_t h1 = a * 2654435761u ^ b * 40503u ^ c * 69069u;
+    uint32_t h2 = a * 668265263u ^ b * 374761393u ^ c * 1274126177u;
+    // shape into a version-4 style uuid
+    h1 = (h1 & 0xffff0fffu) | 0x00004000u; // version 4
+    h2 = (h2 & 0x3fffffffu) | 0x80000000u; // variant
+    char buf[64];
+    std::snprintf(buf, sizeof(buf),
+                  "uuid:%08x-%04x-%04x-%04x-%04x%08x",
+                  (unsigned)(h1 ^ (h2 >> 3)),
+                  (unsigned)((h1 >> 16) & 0xffff),
+                  (unsigned)(h1 & 0xffff),
+                  (unsigned)((h2 >> 16) & 0xffff),
+                  (unsigned)(h2 & 0xffff),
+                  (unsigned)(h1 * 31 + h2));
+    return buf;
 }
 
 static std::string DefaultConfigPath()
@@ -154,7 +166,12 @@ int main(int argc, char* argv[])
     DvStack* dvStack = lib->StartDv();
     dvStack->Start();
 
-    const std::string udn = MakeUdn();
+    std::string udn = prefs.Udn();
+    if (udn.empty()) {
+        udn = MakeUdn();
+        prefs.SetUdn(udn);
+        prefs.Save(configPath);
+    }
     const Bws<128> udnBuf(reinterpret_cast<const TByte*>(udn.data()), static_cast<TUint>(udn.size()));
     const std::string room = prefs.Room();
     const Bws<64> roomBuf(reinterpret_cast<const TByte*>(room.data()), static_cast<TUint>(room.size()));
