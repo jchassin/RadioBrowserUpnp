@@ -35,9 +35,12 @@ static void SigHandler(int)
     gQuit = true;
 }
 
-// UDN must be a valid uuid:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (UPnP 1.0
-// device architecture); malformed uuids are silently rejected by some control
-// points (e.g. Linn/Kazoo validate the format).
+// The device udn must be a valid uuid:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+// (UPnP 1.0 device architecture); malformed uuids are silently rejected by
+// some control points (e.g. Linn/Kazoo validate the format).
+// NOTE: ohNet prepends "uuid:" itself when writing <UDN>, so the value passed
+// to DvDeviceStandard must be the BARE uuid (no "uuid:" prefix) - a prefixed
+// value produces "uuid:uuid:..." in device.xml.
 // The udn is generated once and persisted in the config file so the device
 // keeps a stable identity across restarts and hostname changes (control
 // points remember pinned stations by udn).
@@ -53,7 +56,7 @@ static std::string MakeUdn()
     h2 = (h2 & 0x3fffffffu) | 0x80000000u; // variant
     char buf[64];
     std::snprintf(buf, sizeof(buf),
-                  "uuid:%08x-%04x-%04x-%04x-%04x%08x",
+                  "%08x-%04x-%04x-%04x-%04x%08x",
                   (unsigned)(h1 ^ (h2 >> 3)),
                   (unsigned)((h1 >> 16) & 0xffff),
                   (unsigned)(h1 & 0xffff),
