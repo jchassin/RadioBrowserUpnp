@@ -10,7 +10,11 @@ OHNET_LIBS := $(OHNET_BUILD)/Obj/Posix/Release
 
 # ohNet needs rsync or falls back to cp -u; rsync is often absent in
 # minimal/synology environments so force the cp fallback.
-OHNET_MAKE = $(MAKE) -C $(OHNET_DIR) native_only=yes rsync=no
+# The 'devices' target builds only the native libs we link against
+# (ohNetCore/proxies/devices); ohNet's default 'all' also runs
+# bundle_binaries.py, which fails on plain aarch64 Linux (it only knows
+# aarch64 with the kirkstone/scarthgap distros) and is useless here.
+OHNET_MAKE = $(MAKE) -C $(OHNET_DIR) native_only=yes rsync=no devices proxies
 
 # Matches the flags ohNet itself is compiled with (little endian on both
 # amd64 and aarch64 Linux).
