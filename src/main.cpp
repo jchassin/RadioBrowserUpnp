@@ -12,6 +12,7 @@
 #include <OpenHome/Private/Printer.h>
 #include <OpenHome/Private/Ascii.h>
 
+#include <arpa/inet.h>
 #include <atomic>
 #include <csignal>
 #include <cstdio>
@@ -63,6 +64,61 @@ static std::string DefaultConfigPath()
     return "/etc/radiobrowserupnp.json";
 }
 
+static std::string AdapterAddrText(const TIpAddress& aAddr)
+{
+    // aAddr.iV4 is network order
+    const uint32_t a = aAddr.iV4;
+    std::ostringstream os;
+    os << ((a >> 0) & 0xff) << "." << ((a >> 8) & 0xff) << "."
+       << ((a >> 16) & 0xff) << "." << ((a >> 24) & 0xff);
+    return os.str();
+}
+
+// Pick the subnet to announce on. On NAS hosts (docker0, ovs bridges, vpn
+// tun adapters, ...) the first adapter ohNet would pick is often not the
+// LAN interface, leaving the device invisible to control points.
+// Priority: RADIOBROWSERUPNP_SUBNET env override, then the first adapter
+// whose name contains eth/enp/ens/em (typical LAN naming), then the first
+// non-loopback adapter.
+static const NetworkAdapter* PickAdapter(const std::vector<NetworkAdapter*>& aList)
+{
+    Log::Print("RadioBrowserUpnp: %d network adapter(s):\n", (int)aList.size());
+    for (const auto* a : aList) {
+        Log::Print("  - %s: addr=%s subnet=%s\n",
+                   a->Name(),
+                   AdapterAddrText(a->Address()).c_str(),
+                   AdapterAddrText(a->Subnet()).c_str());
+    }
+    const char* envSubnet = std::getenv("RADIOBROWSERUPNP_SUBNET");
+    if (envSubnet && *envSubnet) {
+        // parse dotted quad into network order (host bytes reversed)
+        uint32_t parts[4] = {0, 0, 0, 0};
+        const int parsed = std::sscanf(envSubnet, "%u.%u.%u.%u", &parts[0], &parts[1], &parts[2], &parts[3]);
+        if (parsed == 4) {
+            const uint32_t want = htonl(parts[0] << 24 | parts[1] << 16 | parts[2] << 8 | parts[3]);
+            for (const auto* a : aList) {
+                if (a->Address().iFamily == kFamilyV4 &&
+                    want == a->Subnet().iV4) {
+                    Log::Print("RadioBrowserUpnp: subnet override matched %s\n", a->Name());
+                    return a;
+                }
+            }
+            Log::Print("RadioBrowserUpnp: no adapter matches subnet %s\n", envSubnet);
+        }
+        else {
+            Log::Print("RadioBrowserUpnp: bad RADIOBROWSERUPNP_SUBNET '%s'\n", envSubnet);
+        }
+    }
+    for (const char* pat : { "eth", "enp", "ens", "em" }) {
+        for (const auto* a : aList) {
+            if (std::strstr(a->Name(), pat) != nullptr) {
+                return a;
+            }
+        }
+    }
+    return aList.empty() ? nullptr : aList[0];
+}
+
 int main(int argc, char* argv[])
 {
     std::signal(SIGINT, SigHandler);
@@ -84,11 +140,19 @@ int main(int argc, char* argv[])
         delete lib;
         return 1;
     }
-    TIpAddress subnet = (*subnetList)[0]->Subnet();
+    const NetworkAdapter* chosen = PickAdapter(*subnetList);
+    if (chosen == nullptr) {
+        Log::Print("RadioBrowserUpnp: no network adapter\n");
+        Library::DestroySubnetList(subnetList);
+        delete lib;
+        return 1;
+    }
+    Log::Print("RadioBrowserUpnp: announcing on %s (addr %s)\n",
+               chosen->Name(), AdapterAddrText(chosen->Address()).c_str());
+    lib->SetCurrentSubnet(chosen->Subnet());
     Library::DestroySubnetList(subnetList);
     DvStack* dvStack = lib->StartDv();
     dvStack->Start();
-    (void)subnet;
 
     const std::string udn = MakeUdn();
     const Bws<128> udnBuf(reinterpret_cast<const TByte*>(udn.data()), static_cast<TUint>(udn.size()));

@@ -56,6 +56,20 @@ adapters and picks a free UPnP port.
 
 ### Configuration
 
+### Adapter selection / SSDP visibility
+
+On hosts with several interfaces (docker bridges, VPNs, bonding), ohNet may pick
+the wrong one and the device stays invisible to control points. The server now
+logs all adapters at startup and picks the first `eth*`/`enp*`/`ens*`/`em*`
+interface; you can force the subnet explicitly:
+
+```bash
+docker run ... -e RADIOBROWSERUPNP_SUBNET=192.168.1.0 ...   # subnet address
+```
+
+Diagnostic: `docker logs radiobrowserupnp` prints every adapter (name, address,
+subnet) and which one was chosen.
+
 The config file (JSON) is read at startup and written on shutdown; path:
 
 * `$RADIOBROWSERUPNP_CONFIG` if set
