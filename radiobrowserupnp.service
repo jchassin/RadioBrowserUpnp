@@ -1,0 +1,16 @@
+[Unit]
+Description=RadioBrowserUpnp - UPnP Media Server for radio-browser.info
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/radiobrowserupnp
+Environment=RADIOBROWSERUPNP_CONFIG=/etc/radiobrowserupnp.json
+Restart=on-failure
+RestartSec=5
+# The web ui is a plain config page; restrict to the local network as needed.
+# AmbientCapabilities not required; the app binds no privileged ports.
+
+[Install]
+WantedBy=multi-user.target

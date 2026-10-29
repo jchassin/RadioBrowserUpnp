@@ -1,0 +1,7 @@
+Build/
+build/
+*.o
+*.a
+*.elf
+dependencies/
+thirdparty/ohNet/
