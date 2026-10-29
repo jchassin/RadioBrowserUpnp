@@ -73,6 +73,7 @@ subnet) and which one was chosen.
 The config file (JSON) is read at startup and written on shutdown; path:
 
 * `$RADIOBROWSERUPNP_CONFIG` if set
+* else `/data/radiobrowserupnp.json` if a `/data` directory exists (container layout)
 * else `~/.config/radiobrowserupnp.json`
 * else `/etc/radiobrowserupnp.json`
 
@@ -100,20 +101,52 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now radiobrowserupnp
 ```
 
+### Container (Docker Hub)
+
+The image is published for `linux/amd64` and `linux/arm64`. Three things matter:
+
+1. **Host networking is required** — UPnP discovery uses SSDP multicast, which
+   does not traverse the docker bridge. Without `--network host` the server
+   runs but no control point will see it.
+2. **Port 8028** — the embedded web configuration ui
+   (`http://<host>:8028/`). The UPnP port itself is picked dynamically and
+   needs no mapping.
+3. **Persistent storage at `/data`** — the config file
+   (`/data/radiobrowserupnp.json`, incl. the device uuid your control points
+   use to identify the server and its pins) must survive restarts. Without a
+   volume a new uuid is generated at each container recreation.
+
+```bash
+docker run -d --name radiobrowserupnp --network host \
+  -v /path/on/host:/data \
+  --restart unless-stopped radiobrowserupnp
+```
+
+Optional environment variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `RADIOBROWSERUPNP_CONFIG` | `/data/radiobrowserupnp.json` (if `/data` exists) | config file path override |
+| `RADIOBROWSERUPNP_SUBNET` | auto | force the LAN subnet (dotted quad, e.g. `192.168.1.0`) on multi-interface hosts |
+
+Fixing the hostname (`--hostname mynas`) is recommended so the device keeps a
+stable identity even if the config volume is lost.
+
 ### Synology NAS
 
 Two options:
 
 1. **Container Manager (Docker)** - recommended:
-   * Build the image (any x86_64 or ARMv8 NAS): `docker build -t radiobrowserupnp .`
+   * Import the Docker Hub image (or build locally: `docker build -t radiobrowserupnp .`,
+     works on x86_64 and ARMv8 models)
    * Run with **host networking** (required for SSDP discovery) and mount
-     `/config` on a persistent shared folder:
+     a persistent shared folder at `/data`:
      ```bash
      docker run -d --name radiobrowserupnp --network host \
-       -v /volume1/docker/radiobrowserupnp:/config \
+       --hostname sun \
+       -v /volume1/docker/radiobrowserupnp:/data \
        --restart unless-stopped radiobrowserupnp
      ```
-   * Multi-arch: build on each arch, or use `docker buildx --platform linux/amd64,linux/arm64 --push`.
 2. **Native package**: build on a matched toolchain (DSM 7 uses its own gcc via
    the Synology toolkit); the Makefile is toolchain-agnostic (`CC/CXX` overridable,
    little-endian assumed on all supported models). Install like the systemd path

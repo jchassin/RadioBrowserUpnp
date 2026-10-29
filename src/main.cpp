@@ -14,6 +14,7 @@
 
 #include <arpa/inet.h>
 #include <cstdint>
+#include <sys/stat.h>
 #include <ctime>
 #include <atomic>
 #include <csignal>
@@ -71,6 +72,11 @@ static std::string DefaultConfigPath()
     const char* env = std::getenv("RADIOBROWSERUPNP_CONFIG");
     if (env && *env) {
         return env;
+    }
+    // Container layout: persistent volume mounted at /data.
+    struct stat st;
+    if (::stat("/data", &st) == 0 && S_ISDIR(st.st_mode)) {
+        return "/data/radiobrowserupnp.json";
     }
     const char* home = std::getenv("HOME");
     if (home && *home) {
