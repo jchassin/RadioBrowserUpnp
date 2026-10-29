@@ -39,6 +39,21 @@ jobs:
             echo "dockerhub_image=" >> "$GITHUB_OUTPUT"
           fi
 
+      # Diagnostic only: asks Docker Hub for a push-capable token using the
+      # configured credentials and prints ONLY the http status / scopes -
+      # never the token itself.
+      - name: Diagnose Docker Hub token scopes
+        if: github.event_name != 'pull_request'
+        run: |
+          RESP=$(curl -s -o /tmp/token.json -w "%{http_code}" -u "${{ secrets.DOCKERHUB_USERNAME }}:${{ secrets.DOCKERHUB_TOKEN }}" "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${{ secrets.DOCKERHUB_USERNAME }}/radiobrowserupnp:pull,push")
+          echo "auth.docker.io returned http $RESP"
+          python3 -c "import json;d=json.load(open('/tmp/token.json'));print('token scopes:',d.get('token','')[:0] or 'granted' if 'token' in d else d)" 2>/dev/null || cat /tmp/token.json | head -c 300
+          echo
+          if [ "$RESP" != "200" ]; then
+            echo "::error::Docker Hub refused to issue a push token - the DOCKERHUB_TOKEN secret is not Read & Write, or the username does not own the token"
+            exit 1
+          fi
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
