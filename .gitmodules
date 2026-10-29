@@ -1,0 +1,4 @@
+[submodule "thirdparty/ohNet"]
+	path = thirdparty/ohNet
+	url = https://github.com/openhome/ohNet
+	shallow = true
