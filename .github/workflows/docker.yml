@@ -73,7 +73,7 @@ jobs:
       # picking those credentials up and fell back to an ANONYMOUS token
       # request, which auth.docker.io answers with "insufficient scopes".
       - name: Log in to Docker Hub
-        if: github.event_name != 'pull_request' && steps.dockerhub.outputs.dockerhub == 'true'
+        if: github.event_name != 'pull_request' && steps.dockerhub.outputs.enabled == 'true'
         run: |
           echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login registry-1.docker.io -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
