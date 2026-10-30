@@ -89,10 +89,10 @@ private:
     void BrowseName(Bws<65536>& aDidl, TUint aStartingIndex, TUint aRequestedCount, TUint& aNumberReturned, TUint& aTotalMatches);
     void BrowseQualityContainers(const Brx& aParentId, Bws<65536>& aDidl, TUint aStartingIndex, TUint aRequestedCount, TUint& aNumberReturned, TUint& aTotalMatches);
     void BrowseQualityStations(const std::vector<RadioBrowserClient::Station>& aStations, const Brx& aQuality, Bws<65536>& aDidl, TUint aStartingIndex, TUint aRequestedCount, TUint& aNumberReturned, TUint& aTotalMatches);
-    const std::vector<RadioBrowserClient::Station>& LetterStations(const Brx& aLetter);
-    const std::vector<RadioBrowserClient::Station>& TopStations();
-    const std::vector<RadioBrowserClient::Station>& CountryStations(const Brx& aCountry);
-    const std::vector<RadioBrowserClient::Station>& GenreStations(const Brx& aGenre);
+    std::vector<RadioBrowserClient::Station> LetterStations(const Brx& aLetter);
+    std::vector<RadioBrowserClient::Station> TopStations();
+    std::vector<RadioBrowserClient::Station> CountryStations(const Brx& aCountry);
+    std::vector<RadioBrowserClient::Station> GenreStations(const Brx& aGenre);
     void BrowseSearch(Bws<65536>& aDidl, TUint aStartingIndex, TUint aRequestedCount, TUint& aNumberReturned, TUint& aTotalMatches);
     void RunSearch(const Brx& aName);
     void WriteStationDidl(Bws<2048>& aDidl, const RadioBrowserClient::Station& aStation, TUint aIndex);
@@ -105,7 +105,7 @@ private:
     std::unique_ptr<ConnectionManager> iConnectionManager;
     RadioBrowserClient iClient;
     TUint iSystemUpdateId;
-    std::mutex iLock;
+    std::recursive_mutex iLock;
     // caches
     std::vector<RadioBrowserClient::Station> iTopCache;
     TUint64 iTopCacheTimeMs;
@@ -120,7 +120,13 @@ private:
         TUint64 iTimeMs;
     };
     std::vector<ListCacheEntry> iListCache;
-    const std::vector<RadioBrowserClient::Station>& CachedStations(
+    // Returns a COPY of the cached station list. Fetches run OUTSIDE the lock
+    // so a slow api call never blocks other browses (control points browse
+    // several containers concurrently; a global lock during a http fetch was
+    // the cause of control-point timeouts). A stale-but-populated cache is
+    // served immediately (stale-while-revalidate): the caller gets a fast
+    // answer while a background refresh updates the cache for next time.
+    std::vector<RadioBrowserClient::Station> CachedStations(
         const Brx& aKey,
         std::function<void(std::vector<RadioBrowserClient::Station>&)> aFetcher);
     std::vector<Brn> iCountries;

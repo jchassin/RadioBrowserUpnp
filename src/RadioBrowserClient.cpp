@@ -264,13 +264,7 @@ private:
 // RadioBrowserClient::Station
 
 RadioBrowserClient::Station::Station()
-    : iName(kNameMaxBytes)
-    , iUri(kUriMaxBytes)
-    , iImage(kImageMaxBytes)
-    , iTags(kTagsMaxBytes)
-    , iCountry(8)
-    , iCodec(16)
-    , iBitrate(0)
+    : iBitrate(0)
     , iHls(false)
     , iLastCheckOk(false)
 {
@@ -576,7 +570,7 @@ void RadioBrowserClient::ParseStations(const std::vector<TByte>& aData,
                     Bwh url(kUriMaxBytes);
                     json.ReadString(url, url.MaxBytes());
                     if (url.Bytes() > 0) {
-                        s.iUri.Replace(url); // resolved url wins over the raw one
+                        s.iUri.assign(reinterpret_cast<const char*>(url.Ptr()), url.Bytes()); // resolved url wins
                         haveUri = true;
                     }
                 }
@@ -584,24 +578,34 @@ void RadioBrowserClient::ParseStations(const std::vector<TByte>& aData,
                     Bwh url(kUriMaxBytes);
                     json.ReadString(url, url.MaxBytes());
                     if (!haveUri && url.Bytes() > 0) {
-                        s.iUri.Replace(url);
+                        s.iUri.assign(reinterpret_cast<const char*>(url.Ptr()), url.Bytes());
                         haveUri = true;
                     }
                 }
                 else if (memberName == Brn("name")) {
-                    json.ReadString(s.iName, s.iName.MaxBytes());
+                    Bwh v(kNameMaxBytes);
+                    json.ReadString(v, v.MaxBytes());
+                    s.iName.assign(reinterpret_cast<const char*>(v.Ptr()), v.Bytes());
                 }
                 else if (memberName == Brn("favicon")) {
-                    json.ReadString(s.iImage, s.iImage.MaxBytes());
+                    Bwh v(kImageMaxBytes);
+                    json.ReadString(v, v.MaxBytes());
+                    s.iImage.assign(reinterpret_cast<const char*>(v.Ptr()), v.Bytes());
                 }
                 else if (memberName == Brn("tags")) {
-                    json.ReadString(s.iTags, s.iTags.MaxBytes());
+                    Bwh v(kTagsMaxBytes);
+                    json.ReadString(v, v.MaxBytes());
+                    s.iTags.assign(reinterpret_cast<const char*>(v.Ptr()), v.Bytes());
                 }
                 else if (memberName == Brn("countrycode")) {
-                    json.ReadString(s.iCountry, s.iCountry.MaxBytes());
+                    Bwh v(8);
+                    json.ReadString(v, v.MaxBytes());
+                    s.iCountry.assign(reinterpret_cast<const char*>(v.Ptr()), v.Bytes());
                 }
                 else if (memberName == Brn("codec")) {
-                    json.ReadString(s.iCodec, s.iCodec.MaxBytes());
+                    Bwh v(16);
+                    json.ReadString(v, v.MaxBytes());
+                    s.iCodec.assign(reinterpret_cast<const char*>(v.Ptr()), v.Bytes());
                 }
                 else if (memberName == Brn("bitrate")) {
                     s.iBitrate = json.ReadNumber();
@@ -618,7 +622,7 @@ void RadioBrowserClient::ParseStations(const std::vector<TByte>& aData,
             }
             json.Expect('}');
 
-            if (!haveUri || s.iUri.Bytes() == 0) {
+            if (!haveUri || s.iUri.empty()) {
                 continue; // unusable entry
             }
             if (!s.iLastCheckOk) {

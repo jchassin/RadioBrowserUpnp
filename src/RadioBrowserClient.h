@@ -3,6 +3,7 @@
 #include <OpenHome/Types.h>
 #include <OpenHome/Buffer.h>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace OpenHome {
@@ -32,23 +33,29 @@ public:
     {
     public:
         Station();
-        const Brx& Name() const { return iName; }
-        const Brx& Uri() const { return iUri; }         // resolved stream url
-        const Brx& ImageUri() const { return iImage; }   // favicon (may be empty)
-        const Brx& Tags() const { return iTags; }
-        const Brx& CountryCode() const { return iCountry; }
-        const Brx& Codec() const { return iCodec; }
+        // Views are valid as long as the Station object is alive and unmodified.
+        Brn Name() const { return Str(iName); }
+        Brn Uri() const { return Str(iUri); }         // resolved stream url
+        Brn ImageUri() const { return Str(iImage); }  // favicon (may be empty)
+        Brn Tags() const { return Str(iTags); }
+        Brn CountryCode() const { return Str(iCountry); }
+        Brn Codec() const { return Str(iCodec); }
         TUint Bitrate() const { return iBitrate; }
         TBool Hls() const { return iHls; }
         TBool LastCheckOk() const { return iLastCheckOk; }
     private:
         friend class RadioBrowserClient;
-        Bwh iName;
-        Bwh iUri;
-        Bwh iImage;
-        Bwh iTags;
-        Bwh iCountry;
-        Bwh iCodec;
+        static Brn Str(const std::string& aStr)
+        {
+            return Brn(reinterpret_cast<const TByte*>(aStr.data()),
+                       static_cast<TUint>(aStr.size()));
+        }
+        std::string iName;
+        std::string iUri;
+        std::string iImage;
+        std::string iTags;
+        std::string iCountry;
+        std::string iCodec;
         TUint iBitrate;
         TBool iHls;
         TBool iLastCheckOk;
