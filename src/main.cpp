@@ -185,7 +185,17 @@ int main(int argc, char* argv[])
     const std::string room = prefs.Room();
     const Bws<64> roomBuf(reinterpret_cast<const TByte*>(room.data()), static_cast<TUint>(room.size()));
 
-    RadioBrowserMediaServer* server = new RadioBrowserMediaServer(*dvStack, dvStack->Env(), udnBuf, roomBuf);
+    // Persistent station cache lives next to the config file.
+    std::string cachePath = configPath;
+    const std::string::size_type slash = cachePath.rfind('/');
+    if (slash != std::string::npos) {
+        cachePath = cachePath.substr(0, slash + 1) + "stations-cache.json";
+    }
+    else {
+        cachePath = "stations-cache.json";
+    }
+
+    RadioBrowserMediaServer* server = new RadioBrowserMediaServer(*dvStack, dvStack->Env(), udnBuf, roomBuf, cachePath);
     // Apply the persisted country / genre lists over the code defaults.
     {
         std::vector<Brn> countries;
@@ -213,6 +223,7 @@ int main(int argc, char* argv[])
 
     while (!gQuit) {
         ::usleep(500 * 1000);
+        server->CacheMaintenance();
     }
 
     Log::Print("RadioBrowserUpnp: shutting down\n");

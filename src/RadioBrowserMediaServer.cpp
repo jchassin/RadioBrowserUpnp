@@ -348,14 +348,44 @@ void RadioBrowserMediaServer::ConnectionManager::GetCurrentConnectionInfo(Net::I
 RadioBrowserMediaServer::RadioBrowserMediaServer(Net::DvStack& aDvStack,
                                                  Environment& aEnv,
                                                  const Brx& aUdn,
-                                                 const Brx& aFriendlyName)
+                                                 const Brx& aFriendlyName,
+                                                 const std::string& aCachePath)
     : iDevice(nullptr)
     , iClient(aEnv, Brx::Empty())
     , iSystemUpdateId(1)
     , iTopCacheTimeMs(0)
     , iSearchTerm(128)
     , iSearchCacheTimeMs(0)
+    , iDiskCache(aCachePath)
 {
+    // Preload the persistent station cache into the memory cache so the very
+    // first browse after a (re)start is served from disk - the point of the
+    // cache is precisely to survive api outages and reboots.
+    {
+        std::vector<std::string> keys;
+        std::vector<std::vector<RadioBrowserClient::Station>> lists;
+        if (iDiskCache.Load(keys, lists)) {
+            const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            for (size_t i = 0; i < keys.size() && i < lists.size(); i++) {
+                const std::string& k = keys[i];
+                if (k == "top") {
+                    iTopCache = lists[i];
+                    iTopCacheTimeMs = now; // consider fresh; normal expiry will re-fetch
+                    continue;
+                }
+                if (iListCache.size() >= 8) {
+                    break; // memory cache capacity
+                }
+                ListCacheEntry entry;
+                entry.iKey.Replace(Brn(reinterpret_cast<const TByte*>(k.data()),
+                                       static_cast<TUint>(k.size())));
+                entry.iStations = std::move(lists[i]);
+                entry.iTimeMs = now;
+                iListCache.push_back(std::move(entry));
+            }
+        }
+    }
     iDevice = new Net::DvDeviceStandard(aDvStack, aUdn);
     iDevice->SetAttribute("Upnp.Domain", "upnp.org");
     iDevice->SetAttribute("Upnp.Type", "MediaServer");
@@ -706,8 +736,9 @@ std::vector<RadioBrowserClient::Station> RadioBrowserMediaServer::CachedStations
                     return entry.iStations; // refreshed by a concurrent fetch
                 }
                 if (!fetched.empty()) {
-                    entry.iStations = std::move(fetched);
+                    entry.iStations = fetched;
                     entry.iTimeMs = now;
+                    iDiskCache.Update(CacheKeyToDiskKey(aKey), fetched);
                     return entry.iStations;
                 }
                 if (haveStale) {
@@ -736,8 +767,11 @@ std::vector<RadioBrowserClient::Station> RadioBrowserMediaServer::CachedStations
         }
         auto& entry = iListCache[oldest];
         entry.iKey.Replace(aKey);
-        entry.iStations = std::move(fetched);
+        entry.iStations = fetched;
         entry.iTimeMs = now;
+        if (!fetched.empty()) {
+            iDiskCache.Update(CacheKeyToDiskKey(aKey), fetched);
+        }
         return entry.iStations;
     }
 }
@@ -764,8 +798,9 @@ std::vector<RadioBrowserClient::Station> RadioBrowserMediaServer::TopStations()
         return iTopCache; // refreshed concurrently; prefer the existing copy
     }
     if (!fetched.empty()) {
-        iTopCache = std::move(fetched);
+        iTopCache = fetched;
         iTopCacheTimeMs = now;
+        iDiskCache.Update("top", fetched);
     }
     else if (!iTopCache.empty()) {
         iTopCacheTimeMs = now; // fetch failed; retry later, serve stale
@@ -848,6 +883,19 @@ void RadioBrowserMediaServer::WriteContainerDidl(Bws<65536>& aDidl, const Brx& a
     w.Write(Brn("</dc:title><upnp:class>object.container</upnp:class><upnp:childCount>"));
     Ascii::StreamWriteUint(w, aChildCount);
     w.Write(Brn("</upnp:childCount></container>"));
+}
+
+void RadioBrowserMediaServer::CacheMaintenance()
+{
+    iDiskCache.FlushIfDue();
+}
+
+std::string RadioBrowserMediaServer::CacheKeyToDiskKey(const Brx& aKey)
+{
+    // Disk keys match the in-memory cache keys exactly (e.g. "country:FR") -
+    // ':' is perfectly legal in json string keys, and matching the memory key
+    // avoids a lossy round-trip conversion.
+    return std::string(reinterpret_cast<const TChar*>(aKey.Ptr()), aKey.Bytes());
 }
 
 } // namespace Av

@@ -43,6 +43,22 @@ public:
         TUint Bitrate() const { return iBitrate; }
         TBool Hls() const { return iHls; }
         TBool LastCheckOk() const { return iLastCheckOk; }
+        // std::string accessors (disk cache serialisation) and setters (parsing)
+        const std::string& NameStr() const { return iName; }
+        const std::string& UriStr() const { return iUri; }
+        const std::string& ImageStr() const { return iImage; }
+        const std::string& TagsStr() const { return iTags; }
+        const std::string& CountryStr() const { return iCountry; }
+        const std::string& CodecStr() const { return iCodec; }
+        void SetName(const std::string& aV) { iName = aV; }
+        void SetUri(const std::string& aV) { iUri = aV; }
+        void SetImageUri(const std::string& aV) { iImage = aV; }
+        void SetTags(const std::string& aV) { iTags = aV; }
+        void SetCountryCode(const std::string& aV) { iCountry = aV; }
+        void SetCodec(const std::string& aV) { iCodec = aV; }
+        void SetBitrate(TUint aV) { iBitrate = aV; }
+        void SetHls(TBool aV) { iHls = aV; }
+        void SetLastCheckOk(TBool aV) { iLastCheckOk = aV; }
     private:
         friend class RadioBrowserClient;
         static Brn Str(const std::string& aStr)

@@ -7,6 +7,7 @@
 #include "generated/DvUpnpOrgContentDirectory1.h"
 #include "generated/DvUpnpOrgConnectionManager1.h"
 #include "RadioBrowserClient.h"
+#include "StationDiskCache.h"
 
 #include <vector>
 #include <memory>
@@ -47,8 +48,12 @@ public:
     RadioBrowserMediaServer(Net::DvStack& aDvStack,
                             Environment& aEnv,
                             const Brx& aUdn,          // full UPnP udn: uuid:xxxxxxxx-...
-                            const Brx& aFriendlyName);
+                            const Brx& aFriendlyName,
+                            const std::string& aCachePath); // persistent station cache
     ~RadioBrowserMediaServer();
+
+    // Periodic maintenance (debounced disk writes). Call from the main loop.
+    void CacheMaintenance();
 
     void Start();
 
@@ -120,6 +125,8 @@ private:
         TUint64 iTimeMs;
     };
     std::vector<ListCacheEntry> iListCache;
+    StationDiskCache iDiskCache;
+    std::string CacheKeyToDiskKey(const Brx& aKey); // "name:F" -> "name_F" (disk-safe)
     // Returns a COPY of the cached station list. Fetches run OUTSIDE the lock
     // so a slow api call never blocks other browses (control points browse
     // several containers concurrently; a global lock during a http fetch was
