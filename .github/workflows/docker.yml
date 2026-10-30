@@ -20,6 +20,7 @@ jobs:
       packages: write
     outputs:
       dockerhub: ${{ steps.dockerhub.outputs.enabled }}
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -95,6 +96,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push (multi-arch)
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -104,3 +106,51 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Supply-chain attestations stored alongside the image in GHCR
+          # (Docker Hub does not support attestations): SLSA provenance
+          # (sources, builder, timestamps) and SBOM (component inventory).
+          provenance: mode=max
+          sbom: true
+
+  # Verify the published image against its provenance: the attestation must
+  # reference THIS run's commit - the guarantee that the image tagged X was
+  # built from the sources of X. A tampered or manually re-pushed image
+  # breaks this check and fails the workflow.
+  verify:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+      attestations: read
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify image provenance against this build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          set -e
+          echo "Verifying provenance of image @${IMAGE_DIGEST}"
+          gh attestation verify "${IMAGE_DIGEST}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --predicate-type "https://slsa.dev/provenance/v0.2" \
+            --json > /tmp/attestations.json
+          python3 scripts/extract-provenance-commit.py /tmp/attestations.json > /tmp/commit.txt
+          COMMIT=$(cat /tmp/commit.txt)
+          echo "Provenance references commit: ${COMMIT}"
+          echo "This run built from commit:  ${EXPECTED_COMMIT}"
+          test "${COMMIT}" = "${EXPECTED_COMMIT}" || {
+            echo "::error::Provenance commit mismatch - the published image does not match this build's sources"
+            exit 1
+          }
+          echo "Provenance OK - image matches sources ${EXPECTED_COMMIT}"
