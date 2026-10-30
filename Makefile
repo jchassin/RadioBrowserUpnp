@@ -26,6 +26,7 @@ LIBS := -pthread
 SRCS := src/main.cpp \
          src/RadioBrowserClient.cpp \
          src/RadioBrowserMediaServer.cpp \
+         src/StationDiskCache.cpp \
          src/WebConfig.cpp \
          src/generated/DvUpnpOrgContentDirectory1.cpp \
          src/generated/DvUpnpOrgConnectionManager1.cpp
