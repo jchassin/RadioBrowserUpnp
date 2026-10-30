@@ -112,7 +112,7 @@ void RadioBrowserMediaServer::ContentDirectory::Browse(Net::IDvInvocation& aInvo
         // BrowseMetadata: return the object itself (as a container).
         static const Brn kBrowseMetadata("BrowseMetadata");
         if (aBrowseFlag == kBrowseMetadata) {
-            std::lock_guard<std::mutex> lock(iServer.iLock);
+            std::lock_guard<std::recursive_mutex> lock(iServer.iLock);
             didl.Append(Brn(kDidlPreamble));
             iServer.WriteContainerDidl(didl, aObjectID, aObjectID, 0);
             didl.Append(Brn(kDidlEpilogue));
@@ -120,7 +120,10 @@ void RadioBrowserMediaServer::ContentDirectory::Browse(Net::IDvInvocation& aInvo
             totalMatches = 1;
         }
         else {
-        std::lock_guard<std::mutex> lock(iServer.iLock);
+        // NOTE: no global lock here. Container browses take the lock only
+        // while reading their (small, local) lists; station-list fetches run
+        // outside any lock so a slow radio-browser api call never blocks
+        // other concurrent browses (this was causing control-point timeouts).
         static const Brn kRoot("0");
         static const Brn kTop("top");
         static const Brn kCountry("country");
@@ -260,7 +263,7 @@ void RadioBrowserMediaServer::ContentDirectory::Search(Net::IDvInvocation& aInvo
     TUint totalMatches = 0;
     iServer.UpdateId();
     try {
-        std::lock_guard<std::mutex> lock(iServer.iLock);
+        std::lock_guard<std::recursive_mutex> lock(iServer.iLock);
         iServer.RunSearch(term);
         didl.Append(Brn(kDidlPreamble));
         iServer.BrowseSearch(didl, aStartingIndex, aRequestedCount, numberReturned, totalMatches);
@@ -385,14 +388,14 @@ void RadioBrowserMediaServer::Start()
 
 void RadioBrowserMediaServer::SetCountryList(const std::vector<Brn>& aCountries)
 {
-    std::lock_guard<std::mutex> lock(iLock);
+    std::lock_guard<std::recursive_mutex> lock(iLock);
     iCountries = aCountries;
     UpdateId();
 }
 
 void RadioBrowserMediaServer::SetGenreList(const std::vector<Brn>& aGenres)
 {
-    std::lock_guard<std::mutex> lock(iLock);
+    std::lock_guard<std::recursive_mutex> lock(iLock);
     iGenres = aGenres;
     UpdateId();
 }
@@ -404,6 +407,7 @@ void RadioBrowserMediaServer::UpdateId()
 
 void RadioBrowserMediaServer::BrowseRoot(Bws<65536>& aDidl, TUint aStartingIndex, TUint aRequestedCount, TUint& aNumberReturned, TUint& aTotalMatches)
 {
+    std::lock_guard<std::recursive_mutex> lock(iLock);
     static const Brn kTopId("top");
     static const Brn kCountryId("country");
     static const Brn kGenreId("genre");
@@ -439,6 +443,7 @@ void RadioBrowserMediaServer::BrowseRoot(Bws<65536>& aDidl, TUint aStartingIndex
 
 void RadioBrowserMediaServer::BrowseTop(Bws<65536>& aDidl, TUint aStartingIndex, TUint aRequestedCount, TUint& aNumberReturned, TUint& aTotalMatches)
 {
+    std::lock_guard<std::recursive_mutex> lock(iLock);
     const std::vector<RadioBrowserClient::Station>& stations = TopStations();
     aTotalMatches = stations.size();
     TUint returned = 0;
@@ -469,6 +474,7 @@ void RadioBrowserMediaServer::BrowseTop(Bws<65536>& aDidl, TUint aStartingIndex,
 
 void RadioBrowserMediaServer::BrowseCountry(Bws<65536>& aDidl, TUint aStartingIndex, TUint aRequestedCount, TUint& aNumberReturned, TUint& aTotalMatches)
 {
+    std::lock_guard<std::recursive_mutex> lock(iLock);
     const TUint total = iCountries.size();
     aTotalMatches = total;
     TUint returned = 0;
@@ -484,6 +490,7 @@ void RadioBrowserMediaServer::BrowseCountry(Bws<65536>& aDidl, TUint aStartingIn
 
 void RadioBrowserMediaServer::BrowseGenre(Bws<65536>& aDidl, TUint aStartingIndex, TUint aRequestedCount, TUint& aNumberReturned, TUint& aTotalMatches)
 {
+    std::lock_guard<std::recursive_mutex> lock(iLock);
     const TUint total = iGenres.size();
     aTotalMatches = total;
     TUint returned = 0;
@@ -498,6 +505,7 @@ void RadioBrowserMediaServer::BrowseGenre(Bws<65536>& aDidl, TUint aStartingInde
 
 void RadioBrowserMediaServer::BrowseName(Bws<65536>& aDidl, TUint aStartingIndex, TUint aRequestedCount, TUint& aNumberReturned, TUint& aTotalMatches)
 {
+    std::lock_guard<std::recursive_mutex> lock(iLock);
     // A-Z, using the ascii codes 0x41..0x5A
     const TUint total = 26;
     aTotalMatches = total;
@@ -618,6 +626,7 @@ void RadioBrowserMediaServer::BrowseQualityStations(const std::vector<RadioBrows
 
 void RadioBrowserMediaServer::BrowseSearch(Bws<65536>& aDidl, TUint aStartingIndex, TUint aRequestedCount, TUint& aNumberReturned, TUint& aTotalMatches)
 {
+    std::lock_guard<std::recursive_mutex> lock(iLock);
     aTotalMatches = iSearchCache.size();
     TUint returned = 0;
     for (TUint i = aStartingIndex; i < iSearchCache.size() && (aRequestedCount == 0 || returned < aRequestedCount); i++) {
@@ -656,61 +665,115 @@ void RadioBrowserMediaServer::RunSearch(const Brx& aName)
 }
 
 
-const std::vector<RadioBrowserClient::Station>& RadioBrowserMediaServer::CachedStations(
+std::vector<RadioBrowserClient::Station> RadioBrowserMediaServer::CachedStations(
     const Brx& aKey,
     std::function<void(std::vector<RadioBrowserClient::Station>&)> aFetcher)
 {
     const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
-    for (auto& entry : iListCache) {
-        if (entry.iKey == aKey) {
-            if (now - entry.iTimeMs < kCacheLifetimeMs) {
-                return entry.iStations;
-            }
-            // refresh in place
-            entry.iStations.clear();
-            aFetcher(entry.iStations);
-            entry.iTimeMs = now;
-            return entry.iStations;
-        }
-    }
-    // New entry. ListCacheEntry is not move-assignable (ohNet buffers), so
-    // replace the oldest entry in place instead of erasing.
-    if (iListCache.empty()) {
-        iListCache.emplace_back();
-    }
-    TUint oldest = 0;
-    if (iListCache.size() >= 8) {
-        for (TUint i = 1; i < iListCache.size(); i++) {
-            if (iListCache[i].iTimeMs < iListCache[oldest].iTimeMs) {
-                oldest = i;
+
+    // Fast path: consult the cache under the lock, WITHOUT fetching.
+    TBool haveStale = false;
+    std::vector<RadioBrowserClient::Station> out;
+    {
+        std::lock_guard<std::recursive_mutex> lock(iLock);
+        for (const auto& entry : iListCache) {
+            if (entry.iKey == aKey) {
+                if (now - entry.iTimeMs < kCacheLifetimeMs) {
+                    return entry.iStations; // fresh: serve as-is
+                }
+                if (!entry.iStations.empty()) {
+                    out = entry.iStations; // stale copy to serve immediately
+                    haveStale = true;
+                }
+                break;
             }
         }
     }
-    else {
-        iListCache.emplace_back();
-        oldest = (TUint)(iListCache.size() - 1);
+
+    // Fetch OUTSIDE the lock so concurrent browses of other containers are
+    // never blocked by this http call.
+    std::vector<RadioBrowserClient::Station> fetched;
+    aFetcher(fetched);
+
+    // Store under the lock. If another thread already refreshed the entry
+    // while we fetched, prefer the fresher data and serve it.
+    {
+        std::lock_guard<std::recursive_mutex> lock(iLock);
+        for (auto& entry : iListCache) {
+            if (entry.iKey == aKey) {
+                if (now - entry.iTimeMs < kCacheLifetimeMs) {
+                    return entry.iStations; // refreshed by a concurrent fetch
+                }
+                if (!fetched.empty()) {
+                    entry.iStations = std::move(fetched);
+                    entry.iTimeMs = now;
+                    return entry.iStations;
+                }
+                if (haveStale) {
+                    entry.iTimeMs = now; // retry deadline; serve the stale copy
+                    return out;
+                }
+                return out; // empty
+            }
+        }
+        // New entry. ListCacheEntry is not move-assignable (ohNet buffers),
+        // so replace the oldest entry in place instead of erasing.
+        if (iListCache.empty()) {
+            iListCache.emplace_back();
+        }
+        TUint oldest = 0;
+        if (iListCache.size() >= 8) {
+            for (TUint i = 1; i < iListCache.size(); i++) {
+                if (iListCache[i].iTimeMs < iListCache[oldest].iTimeMs) {
+                    oldest = i;
+                }
+            }
+        }
+        else {
+            iListCache.emplace_back();
+            oldest = (TUint)(iListCache.size() - 1);
+        }
+        auto& entry = iListCache[oldest];
+        entry.iKey.Replace(aKey);
+        entry.iStations = std::move(fetched);
+        entry.iTimeMs = now;
+        return entry.iStations;
     }
-    auto& entry = iListCache[oldest];
-    entry.iKey.Replace(aKey);
-    entry.iStations.clear();
-    aFetcher(entry.iStations);
-    entry.iTimeMs = now;
-    return entry.iStations;
 }
 
-const std::vector<RadioBrowserClient::Station>& RadioBrowserMediaServer::TopStations()
+std::vector<RadioBrowserClient::Station> RadioBrowserMediaServer::TopStations()
 {
     const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
-    if (now - iTopCacheTimeMs >= kCacheLifetimeMs) {
-        iClient.TopStations(iTopCache, kMaxStations);
+
+    // Fast path under the lock; serve the cache when fresh.
+    {
+        std::lock_guard<std::recursive_mutex> lock(iLock);
+        if (now - iTopCacheTimeMs < kCacheLifetimeMs && !iTopCache.empty()) {
+            return iTopCache;
+        }
+    }
+
+    // Fetch outside the lock so a slow api call never blocks other browses.
+    std::vector<RadioBrowserClient::Station> fetched;
+    iClient.TopStations(fetched, kMaxStations);
+
+    std::lock_guard<std::recursive_mutex> lock(iLock);
+    if (now - iTopCacheTimeMs < kCacheLifetimeMs && !iTopCache.empty()) {
+        return iTopCache; // refreshed concurrently; prefer the existing copy
+    }
+    if (!fetched.empty()) {
+        iTopCache = std::move(fetched);
         iTopCacheTimeMs = now;
+    }
+    else if (!iTopCache.empty()) {
+        iTopCacheTimeMs = now; // fetch failed; retry later, serve stale
     }
     return iTopCache;
 }
 
-const std::vector<RadioBrowserClient::Station>& RadioBrowserMediaServer::LetterStations(const Brx& aLetter)
+std::vector<RadioBrowserClient::Station> RadioBrowserMediaServer::LetterStations(const Brx& aLetter)
 {
     Bws<16> key("name:");
     key.Append(aLetter);
@@ -732,7 +795,7 @@ const std::vector<RadioBrowserClient::Station>& RadioBrowserMediaServer::LetterS
     });
 }
 
-const std::vector<RadioBrowserClient::Station>& RadioBrowserMediaServer::CountryStations(const Brx& aCountry)
+std::vector<RadioBrowserClient::Station> RadioBrowserMediaServer::CountryStations(const Brx& aCountry)
 {
     Bws<32> key("country:");
     key.Append(aCountry);
@@ -741,7 +804,7 @@ const std::vector<RadioBrowserClient::Station>& RadioBrowserMediaServer::Country
     });
 }
 
-const std::vector<RadioBrowserClient::Station>& RadioBrowserMediaServer::GenreStations(const Brx& aGenre)
+std::vector<RadioBrowserClient::Station> RadioBrowserMediaServer::GenreStations(const Brx& aGenre)
 {
     Bws<64> key("genre:");
     key.Append(aGenre);
