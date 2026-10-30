@@ -68,14 +68,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Log in directly against registry-1.docker.io (the host buildx contacts)
-      # rather than relying on login-action's docker.io entry: buildx was not
-      # picking those credentials up and fell back to an ANONYMOUS token
-      # request, which auth.docker.io answers with "insufficient scopes".
+      # Standard login-action (no registry override): it writes credentials
+      # for ALL docker.io aliases (docker.io / index.docker.io /
+      # registry-1.docker.io), which buildx resolves when pushing.
+      # The root cause of the earlier 401s was the broken condition fixed in
+      # PR #5 (the login never ran; buildx then pushed anonymously).
       - name: Log in to Docker Hub
         if: github.event_name != 'pull_request' && steps.dockerhub.outputs.enabled == 'true'
-        run: |
-          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login registry-1.docker.io -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          logout: false
 
       - name: Docker metadata
         id: meta
