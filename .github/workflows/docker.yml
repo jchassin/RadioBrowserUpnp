@@ -92,6 +92,10 @@ jobs:
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            # tolerate two-component tags (v0.1) in addition to full semver
+            # (v0.1.0): publish the major.minor tag instead of failing with
+            # "tag is needed when pushing to registry" (no tag matched).
+            type=match,pattern=^v?(\d+\.\d+)$,group=0
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push (multi-arch)
