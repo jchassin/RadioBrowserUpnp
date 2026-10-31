@@ -148,12 +148,12 @@ jobs:
           # EACH per-architecture manifest (OCI referrers), not to the
           # top-level index. Resolve the index into its per-arch digests and
           # verify every one of them.
-          # Use the raw json output + jq (always available on runners):
-          # the go-template --format does not emit real newlines, which
-          # concatenated all digests into one line.
           # --raw emits the standard OCI index json (stable format):
           # filter the real image manifests (linux/*) from the attestation
           # manifests (os "unknown"), whose digests carry no referrers.
+          # (jq is always available on runners; the earlier go-template
+          # --format attempt did not emit real newlines and concatenated
+          # all digests into one invalid reference.)
           docker buildx imagetools inspect "${REGISTRY}/${REPO}@${{ needs.build.outputs.digest }}" --raw \
             | jq -r '.manifests[]? | select((.platform.os // "") != "unknown") | .digest' > /tmp/manifests.txt
           if [ ! -s /tmp/manifests.txt ]; then
