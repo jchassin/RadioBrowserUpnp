@@ -136,21 +136,19 @@ jobs:
       - name: Verify image provenance against this build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+          IMAGE: oci://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}
           EXPECTED_COMMIT: ${{ github.sha }}
         run: |
           set -e
-          echo "Verifying provenance of image @${IMAGE_DIGEST}"
-          gh attestation verify "${IMAGE_DIGEST}" \
+          echo "Verifying provenance of ${IMAGE}"
+          # gh attestation verify checks the signed SLSA provenance of this
+          # exact image digest AND (--source-digest) that it was built from
+          # the source commit of THIS run - the guarantee that the image
+          # tagged X was built from the sources of X. Any mismatch (tampered
+          # or re-pushed image) fails the workflow.
+          gh attestation verify "${IMAGE}" \
             --repo "${GITHUB_REPOSITORY}" \
-            --predicate-type "https://slsa.dev/provenance/v0.2" \
-            --json > /tmp/attestations.json
-          python3 scripts/extract-provenance-commit.py /tmp/attestations.json > /tmp/commit.txt
-          COMMIT=$(cat /tmp/commit.txt)
-          echo "Provenance references commit: ${COMMIT}"
-          echo "This run built from commit:  ${EXPECTED_COMMIT}"
-          test "${COMMIT}" = "${EXPECTED_COMMIT}" || {
-            echo "::error::Provenance commit mismatch - the published image does not match this build's sources"
-            exit 1
-          }
+            --predicate-type "https://slsa.dev/provenance/v1" \
+            --source-digest "sha1:${EXPECTED_COMMIT}" \
+            --format json > /tmp/attestations.json
           echo "Provenance OK - image matches sources ${EXPECTED_COMMIT}"
