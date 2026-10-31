@@ -136,10 +136,12 @@ jobs:
       - name: Verify image provenance against this build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          IMAGE: oci://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}
           EXPECTED_COMMIT: ${{ github.sha }}
         run: |
           set -e
+          # OCI references must be lowercase: metadata-action lowercases
+          # RadioBrowserUpnp when pushing, so the verify step must too.
+          IMAGE="oci://${REGISTRY}/$(echo "${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')@${{ needs.build.outputs.digest }}"
           echo "Verifying provenance of ${IMAGE}"
           # gh attestation verify checks the signed SLSA provenance of this
           # exact image digest AND (--source-digest) that it was built from
