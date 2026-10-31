@@ -148,16 +148,20 @@ jobs:
           # EACH per-architecture manifest (OCI referrers), not to the
           # top-level index. Resolve the index into its per-arch digests and
           # verify every one of them.
-          mapfile -t DIGESTS < <(docker buildx imagetools inspect \
-            "${REGISTRY}/${REPO}@${{ needs.build.outputs.digest }}" \
-            --format '{{range .Manifest.Manifests}}{{.Digest}}\n{{end}}' \
-            | grep -v '^$')
-          if [ "${#DIGESTS[@]}" -eq 0 ]; then
+          # Use the raw json output + jq (always available on runners):
+          # the go-template --format does not emit real newlines, which
+          # concatenated all digests into one line.
+          # --raw emits the standard OCI index json (stable format):
+          # filter the real image manifests (linux/*) from the attestation
+          # manifests (os "unknown"), whose digests carry no referrers.
+          docker buildx imagetools inspect "${REGISTRY}/${REPO}@${{ needs.build.outputs.digest }}" --raw \
+            | jq -r '.manifests[]? | select((.platform.os // "") != "unknown") | .digest' > /tmp/manifests.txt
+          if [ ! -s /tmp/manifests.txt ]; then
             # single-arch fallback: the build digest itself
-            DIGESTS=("${{ needs.build.outputs.digest }}")
+            echo "${{ needs.build.outputs.digest }}" > /tmp/manifests.txt
           fi
-          echo "Index resolves to ${#DIGESTS[@]} manifest(s); verifying each"
-          for D in "${DIGESTS[@]}"; do
+          echo "Index resolves to $(wc -l < /tmp/manifests.txt) image manifest(s); verifying each"
+          while IFS= read -r D; do
             echo "-- verifying ${REPO}@${D}"
             gh attestation verify "oci://${REGISTRY}/${REPO}@${D}" \
               --repo "${GITHUB_REPOSITORY}" \
@@ -165,5 +169,5 @@ jobs:
               --source-digest "sha1:${EXPECTED_COMMIT}" \
               --bundle-from-oci \
               --format json > /dev/null
-          done
+          done < /tmp/manifests.txt
           echo "Provenance OK - all manifests match sources ${EXPECTED_COMMIT}"
