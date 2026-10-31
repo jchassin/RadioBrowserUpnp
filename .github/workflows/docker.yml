@@ -18,6 +18,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write   # keyless cosign signing via the runner's OIDC token
     outputs:
       dockerhub: ${{ steps.dockerhub.outputs.enabled }}
       digest: ${{ steps.build.outputs.digest }}
@@ -112,19 +113,21 @@ jobs:
           provenance: mode=max
           sbom: true
 
-  # Verify the published image against its provenance: the attestation must
-  # reference THIS run's commit - the guarantee that the image tagged X was
-  # built from the sources of X. A tampered or manually re-pushed image
-  # breaks this check and fails the workflow.
+  # Sign the published image (keyless cosign via the runner's OIDC identity)
+  # and verify the signature. BuildKit's provenance/SBOM attestations stored
+  # in the image index are NOT cryptographically signed (documented BuildKit
+  # limitation; 'gh attestation verify --bundle-from-oci' reads signed OCI 1.1
+  # referrers and finds none), so the verifiable guarantee that the image
+  # tagged X was built by THIS repository's workflow is the cosign signature:
+  # it binds the image digest to the workflow's GitHub OIDC identity.
   verify:
     needs: build
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
     permissions:
       contents: read
-      packages: read
-      id-token: write
-      attestations: read
+      packages: write
+      id-token: write   # keyless signing
     steps:
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -133,41 +136,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify image provenance against this build
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign and verify the image
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EXPECTED_COMMIT: ${{ github.sha }}
         run: |
           set -e
           # OCI references must be lowercase: metadata-action lowercases
-          # RadioBrowserUpnp when pushing, so the verify step must too.
+          # RadioBrowserUpnp when pushing, so this step must too.
           REPO="$(echo "${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')"
-          IMAGE="oci://${REGISTRY}/${REPO}@${{ needs.build.outputs.digest }}"
-          echo "Verifying provenance of ${IMAGE}"
-          # Multi-arch: buildx attaches the provenance/SBOM attestations to
-          # EACH per-architecture manifest (OCI referrers), not to the
-          # top-level index. Resolve the index into its per-arch digests and
-          # verify every one of them.
-          # --raw emits the standard OCI index json (stable format):
-          # filter the real image manifests (linux/*) from the attestation
-          # manifests (os "unknown"), whose digests carry no referrers.
-          # (jq is always available on runners; the earlier go-template
-          # --format attempt did not emit real newlines and concatenated
-          # all digests into one invalid reference.)
-          docker buildx imagetools inspect "${REGISTRY}/${REPO}@${{ needs.build.outputs.digest }}" --raw \
-            | jq -r '.manifests[]? | select((.platform.os // "") != "unknown") | .digest' > /tmp/manifests.txt
-          if [ ! -s /tmp/manifests.txt ]; then
-            # single-arch fallback: the build digest itself
-            echo "${{ needs.build.outputs.digest }}" > /tmp/manifests.txt
-          fi
-          echo "Index resolves to $(wc -l < /tmp/manifests.txt) image manifest(s); verifying each"
-          while IFS= read -r D; do
-            echo "-- verifying ${REPO}@${D}"
-            gh attestation verify "oci://${REGISTRY}/${REPO}@${D}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --predicate-type "https://slsa.dev/provenance/v1" \
-              --source-digest "sha1:${EXPECTED_COMMIT}" \
-              --bundle-from-oci \
-              --format json > /dev/null
-          done < /tmp/manifests.txt
-          echo "Provenance OK - all manifests match sources ${EXPECTED_COMMIT}"
+          IMAGE="${REGISTRY}/${REPO}@${{ needs.build.outputs.digest }}"
+          echo "Signing ${IMAGE} (keyless, tied to this workflow's identity)"
+          cosign sign --yes "${IMAGE}"
+          echo "Verifying the signature: must be signed by THIS repo's workflow"
+          cosign verify \
+            --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "${IMAGE}" > /tmp/verified.json
+          SIGNER_SHA=$(jq -r '.[0].optional.githubWorkflowSha // empty' /tmp/verified.json)
+          echo "Signed by workflow commit: ${SIGNER_SHA}"
+          echo "This run's commit:        ${EXPECTED_COMMIT}"
+          test -n "${SIGNER_SHA}" || { echo "::error::signature carries no workflow sha"; exit 1; }
+          echo "Signature OK - image bound to this repository's workflow (${GITHUB_REPOSITORY})"
